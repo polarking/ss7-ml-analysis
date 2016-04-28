@@ -76,13 +76,11 @@ object Main {
       val rddCollect = rdd.collect()
       rddCollect.foreach(prediction => {
         //Save cluster assignment and label for sending to ES
-        val esMap = Map[String,String](
-          "label" -> prediction._1.toString,
-          "cluster" -> prediction._2.toString
-        )
+        val esMap = Map("label" -> prediction._1)
+        val esMap2 = Map("cluster" -> prediction._2)
 
         //Save cluster assignment in elasticsearch for visualization and preprocessing
-        val esRDD = sc.makeRDD(Seq(esMap))
+        val esRDD = sc.makeRDD(Seq(esMap, esMap2))
         esRDD.saveToEs("ss7-ml-results/clustering")
       })
     })
