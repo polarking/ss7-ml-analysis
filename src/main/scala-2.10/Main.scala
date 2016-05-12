@@ -1,12 +1,13 @@
+import breeze.linalg.{norm, DenseVector}
 import kafka.serializer.StringDecoder
 import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
 import org.apache.spark.SparkConf
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.feature.Normalizer
+import org.apache.spark.mllib.linalg.Vector
+import org.apache.spark.mllib.feature.{StandardScaler, Normalizer}
 import org.elasticsearch.spark._
-import org.apache.spark.mllib.clustering.StreamingKMeans
+import org.apache.spark.mllib.clustering.{KMeansModel, KMeans, StreamingKMeansModel, StreamingKMeans}
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.kafka._
 
@@ -17,12 +18,11 @@ object Main {
 
     val user = args(1)
     val pass = args(2)
-    val trainingDataPath = args(3) //Directory of the form: file:///home/kristoffer/spark-testing-data
+    val trainingDataPath = args(3) //File path of the form: file:///home/kristoffer/spark-testing-data
 
     val conf = new SparkConf()
     conf.setAppName(appName)
     conf.setMaster(master)
-    conf.set("spark.cores.max", "8")
 
     // Elasticsearch configuration.
     conf.set("es.resource", "ss7-ml-results/results")
@@ -33,62 +33,87 @@ object Main {
     val sc = new SparkContext(conf)
     val ssc = new StreamingContext(sc, Seconds(10))
 
-    // Creating a K Means model.
-    val numDimensions = 3
-    val numClusters = 2
-    val model = new StreamingKMeans()
-      .setK(numClusters)
-      .setDecayFactor(1.0)
-      .setRandomCenters(numDimensions, 0.0)
-
-    //Creating a normalizer object that normalizes features with L^2 norm.
-    val normalizer = new Normalizer()
-
-    //"Train" K Means model on existing data contained in regular file
-    val trainingData = ssc.textFileStream(trainingDataPath).map(line => {
-      val split = line.split(",")
-      val byteLength = split(1).toDouble
-      val lastUpdate = split(2).toDouble
-      val travelDist = split(3).toDouble
-
-      normalizer.transform(Vectors.dense(byteLength, lastUpdate, travelDist))
-    })
-    model.trainOn(trainingData)
-
     //Kafka input config
     val kafkaParams = Map[String,String]("metadata.broker.list" -> "localhost:9092")
     val topics = Set("ss7-preprocessed")
 
+    // Creating a K Means model.
+    val numDimensions = 4
+    val numClusters = 219 // Provides adequate accuracy.
+
+    //Read training data from textfile.
+    val trainingData = sc.textFile(trainingDataPath).map(line => extractFeatures(line))
+
+    //Creating a standardizer object that standardizes features.
+    val scaler = new StandardScaler().fit(trainingData)
+
+    //Scale training data.
+    val scaledTrainingData = trainingData.map(d => scaler.transform(d))
+
+    //Train K Means model on existing data contained in regular file
+    val kmeans = new KMeans().setK(numClusters).run(scaledTrainingData)
+    val threshold = 1
+
     //Start stream to read from Kafka
     val messages = KafkaUtils.createDirectStream[String,String,StringDecoder,StringDecoder](ssc, kafkaParams, topics)
 
-    //Process each message from Kafka and extract features
-    val processedMessages = messages.flatMap(_._2.split("\n")).map(message => {
-      //Expected features: label,byteLength,lastUpdate,travelDist
-      val split = message.split(",")
-      val label = split(0).toInt
-      val byteLength = split(1).toDouble
-      val lastUpdate = split(2).toDouble
-      val travelDist = split(3).toDouble
+    //Process each message from Kafka, extract features and make prediction
+    messages.flatMap(_._2.split("\n")).foreachRDD(rdd => {
+      rdd.collect.foreach(message => {
+        //Expected features: label,byteLength,lastUpdate,travelDist,newLac
+        val split = message.split(",")
+        val label = split(0).toInt
+        val byteLength = split(1).toDouble
+        val lastUpdate = split(2).toDouble
+        val travelDist = split(3).toDouble
+        val newLac = split(4).toInt
 
-      LabeledPoint(label, normalizer.transform(Vectors.dense(byteLength, lastUpdate, travelDist)))
-    })
+        val isInternal = isInternalMessage(newLac)
+        val internalMsg = if (isInternal) 1 else 0
+        val externalMsg = if (isInternal) 0 else 1
 
-    //Make prediction on new input
-    val predictions = model.predictOnValues(processedMessages.map(message => (message.label, message.features)))
-    predictions.foreachRDD(rdd => {
-      val rddCollect = rdd.collect()
-      rddCollect.foreach(prediction => {
-        //Save cluster assignment and label for sending to ES
-        val esMap = Map("label" -> prediction._1, "cluster" -> prediction._2)
+        val point = LabeledPoint(label, scaler.transform(Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg)))
 
-        //Save cluster assignment in elasticsearch for visualization and preprocessing
-        val esRDD = sc.makeRDD(Seq(esMap))
-        esRDD.saveToEs("ss7-ml-results/results")
+        val distScore = distToCentroid(point.features, kmeans) //Checking this points distance to the centroid
+
+        if (distScore > threshold) { //Possible anomaly.
+          val esMap = Map("label" -> point.label, "score" -> distScore)
+          sc.makeRDD(Seq(esMap)).saveToEs("ss7-ml-results/anomaly")
+        } else { //Possible normal traffic.
+          val esMap = Map("label" -> point.label, "score" -> distScore)
+          sc.makeRDD(Seq(esMap)).saveToEs("ss7-ml-results/normal")
+        }
       })
     })
 
     ssc.start()
     ssc.awaitTermination()
+  }
+
+  def extractFeatures(input: String) = {
+    val split = input.split(",")
+    val byteLength = split(1).toDouble
+    val lastUpdate = split(2).toDouble
+    val travelDist = split(3).toDouble
+    val newLac = split(4).toInt
+
+    val isInternal = isInternalMessage(newLac)
+
+    val internalMsg = if(isInternal) 1 else 0
+    val externalMsg = if(isInternal) 0 else 1
+
+    Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg)
+  }
+
+  def isInternalMessage(lac: Int) = lac > 7000
+
+  def distToCentroid(datum: Vector, model: KMeansModel) =
+    distance(model.clusterCenters(model.predict(datum)), datum)
+
+  def distance(centroid: Vector, datum: Vector) = {
+    val a = DenseVector(centroid.toArray)
+    val b = DenseVector(datum.toArray)
+
+    norm(a - b, 2)
   }
 }
