@@ -21,7 +21,7 @@ localhost. The application expects the following command line arguments:
 1. URL of the Spark master. In the form spark://host:port.
 2. Username for the Elasticsearch cluster.
 3. Password for the Elasticsearch cluster.
-4. Directory containing training data.
+4. File path to the training data.
 
 The application can be started using spark-submit:
 
@@ -33,7 +33,7 @@ bin/spark-submit \
   [Master URL] \
   [Elasticsearch username] \
   [Elasticsearch password] \
-  [Directory for training data]
+  [Path for training data]
 ```
 
 ## Build
