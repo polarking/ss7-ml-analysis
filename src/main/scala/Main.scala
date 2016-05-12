@@ -1,15 +1,13 @@
-import breeze.linalg.{norm, DenseVector}
+import breeze.linalg.{DenseVector, norm}
 import kafka.serializer.StringDecoder
-import org.apache.spark.SparkContext
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.mllib.clustering.{KMeans, KMeansModel}
+import org.apache.spark.mllib.feature.StandardScaler
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.linalg.Vector
-import org.apache.spark.mllib.feature.{StandardScaler, Normalizer}
-import org.elasticsearch.spark._
-import org.apache.spark.mllib.clustering.{KMeansModel, KMeans, StreamingKMeansModel, StreamingKMeans}
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.kafka._
+import org.elasticsearch.spark._
 
 object Main {
   /**
