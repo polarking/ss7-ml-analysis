@@ -1,3 +1,5 @@
+import java.util.Date
+
 import breeze.linalg.{DenseVector, norm}
 import kafka.serializer.StringDecoder
 import org.apache.spark.{SparkConf, SparkContext}
@@ -12,6 +14,7 @@ import org.elasticsearch.spark._
 object Main {
   /**
     * Main entry point for the application.
+ *
     * @param args The command line arguments.
     */
   def main(args: Array[String]): Unit = {
@@ -61,13 +64,14 @@ object Main {
     //Process each message from Kafka, extract features and make prediction
     messages.flatMap(_._2.split("\n")).foreachRDD(rdd => {
       rdd.collect.foreach(message => {
-        //Expected features: label,byteLength,lastUpdate,travelDist,newLac
+        //Expected features: timeEpoch,label,byteLength,lastUpdate,travelDist,newLac
         val split = message.split(",")
-        val label = split(0).toInt
-        val byteLength = split(1).toDouble
-        val lastUpdate = split(2).toDouble
-        val travelDist = split(3).toDouble
-        val newLac = split(4).toInt
+        val timeEpoch = split(0).toInt
+        val label = split(1).toInt
+        val byteLength = split(2).toDouble
+        val lastUpdate = split(3).toDouble
+        val travelDist = split(4).toDouble
+        val newLac = split(5).toInt
 
         val isInternal = isInternalMessage(newLac)
         val internalMsg = if (isInternal) 1 else 0
@@ -77,11 +81,11 @@ object Main {
 
         val distScore = distToCentroid(point.features, kmeans) //Checking this points distance to the centroid
 
+        val esMap = Map("timeEpoch" -> new Date(timeEpoch * 1000L), "label" -> point.label, "score" -> distScore)
+
         if (distScore > threshold) { //Possible anomaly.
-          val esMap = Map("label" -> point.label, "score" -> distScore)
           sc.makeRDD(Seq(esMap)).saveToEs("ss7-ml-results/anomaly")
         } else { //Possible normal traffic.
-          val esMap = Map("label" -> point.label, "score" -> distScore)
           sc.makeRDD(Seq(esMap)).saveToEs("ss7-ml-results/normal")
         }
       })
@@ -93,6 +97,7 @@ object Main {
 
   /**
     * Extracts features from a line containing the features.
+ *
     * @param input The line containing the features read from a file.
     * @return A Vector containing the features.
     */
@@ -113,6 +118,7 @@ object Main {
 
   /**
     * Checks if a message originates from the internal or external network.
+ *
     * @param lac The LAC used to determine message origin.
     * @return True if the message originates from the internal network, false otherwise.
     */
@@ -120,6 +126,7 @@ object Main {
 
   /**
     * Find the distance between the point and the centroid.
+ *
     * @param datum The point.
     * @param model The k-means model containing the centroid.
     * @return Distance between point and centroid using the euclidean distance.
@@ -129,6 +136,7 @@ object Main {
 
   /**
     * Distance between two points using the euclidean distance.
+ *
     * @param V1 The first point.
     * @param V2 The second point.
     * @return The distance between the two points.
