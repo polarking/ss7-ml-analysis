@@ -66,7 +66,7 @@ object Main {
       rdd.collect.foreach(message => {
         //Expected features: timeEpoch,label,byteLength,lastUpdate,travelDist,newLac
         val split = message.split(",")
-        val timeEpoch = split(0).toInt
+        val timeEpoch = split(0).toDouble
         val label = split(1).toInt
         val byteLength = split(2).toDouble
         val lastUpdate = split(3).toDouble
@@ -81,7 +81,7 @@ object Main {
 
         val distScore = distToCentroid(point.features, kmeans) //Checking this points distance to the centroid
 
-        val esMap = Map("timeEpoch" -> new Date(timeEpoch * 1000L), "label" -> point.label, "score" -> distScore)
+        val esMap = Map("timeEpoch" -> new Date(timeEpoch.toInt * 1000L), "label" -> point.label, "score" -> distScore)
 
         if (distScore > threshold) { //Possible anomaly.
           sc.makeRDD(Seq(esMap)).saveToEs("ss7-ml-results/anomaly")
