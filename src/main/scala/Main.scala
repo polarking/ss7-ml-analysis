@@ -56,7 +56,7 @@ object Main {
 
     //Train K Means model on existing data contained in regular file
     val kmeans = new KMeans().setK(numClusters).run(scaledTrainingData)
-    val threshold = 1 //Threshold used to detect outliers.
+    val threshold = 0.2 //Threshold used to detect outliers.
 
     //Start stream to read from Kafka
     val messages = KafkaUtils.createDirectStream[String,String,StringDecoder,StringDecoder](ssc, kafkaParams, topics)
