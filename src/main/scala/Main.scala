@@ -64,7 +64,7 @@ object Main {
     //Process each message from Kafka, extract features and make prediction
     messages.flatMap(_._2.split("\n")).foreachRDD(rdd => {
       rdd.collect.foreach(message => {
-        //Expected features: timeEpoch,label,byteLength,lastUpdate,travelDist,newLac
+        //Expected features: timeEpoch,label,byteLength,lastUpdate,travelDist,newLac,frequency
         val split = message.split(",")
         val timeEpoch = split(0).toDouble
         val label = split(1).toInt
@@ -72,12 +72,13 @@ object Main {
         val lastUpdate = split(3).toDouble
         val travelDist = split(4).toDouble
         val newLac = split(5).toInt
+        val frequency = split(6).toDouble
 
         val isInternal = isInternalMessage(newLac)
         val internalMsg = if (isInternal) 1 else 0
         val externalMsg = if (isInternal) 0 else 1
 
-        val point = LabeledPoint(label, scaler.transform(Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg)))
+        val point = LabeledPoint(label, scaler.transform(Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg, frequency)))
 
         val distScore = distToCentroid(point.features, kmeans) //Checking this points distance to the centroid
 
