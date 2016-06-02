@@ -108,13 +108,14 @@ object Main {
     val lastUpdate = split(2).toDouble
     val travelDist = split(3).toDouble
     val newLac = split(4).toInt
+    val frequency = split(5).toDouble
 
     val isInternal = isInternalMessage(newLac)
 
     val internalMsg = if(isInternal) 1 else 0
     val externalMsg = if(isInternal) 0 else 1
 
-    Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg)
+    Vectors.dense(byteLength, lastUpdate, travelDist, internalMsg, externalMsg, frequency)
   }
 
   /**
